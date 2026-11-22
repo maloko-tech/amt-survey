@@ -108,6 +108,9 @@ def test_sequences_mean_criteria(draws):
 def test_no_demand_value_repeats_across_blocks(draws):
     demands = [r["demand"] for rows in draws.values() for r in rows]
     assert len(demands) == len(set(demands)) == len(cfg.BLOCKS) * cfg.ROUNDS_PER_BLOCK
+    assert min(demands) >= cfg.DEMAND_DRAW_MIN
+    ordered = sorted(demands)
+    assert all(b - a >= cfg.DEMAND_MIN_GAP for a, b in zip(ordered, ordered[1:]))
 
 
 def test_uncertain_blocks_have_their_own_yields(draws):

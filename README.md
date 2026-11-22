@@ -42,7 +42,7 @@ A newsvendor experiment with a short survey, based on Käki, Liesiö, Salo & Tal
 **Same draws for everyone:**
 - `sequences.csv` holds pre-drawn demand and yield values. The app only reads this file and never draws numbers while running.
 - Draws belong to the block, not the position. Everyone sees the same numbers in UH, whatever their sequence.
-- Each block has its own 5 demand values; no demand value appears in more than one block, so participants can't learn a repeating set.
+- Each block has its own 5 demand values; no demand value appears in more than one block, so participants can't learn a repeating set. Pre-drawn demands are at least `DEMAND_DRAW_MIN` (10) and any two differ by at least `DEMAND_MIN_GAP` (5), so none look like a bug or a near-repeat.
 - UH and UL each have their own 5 yield values (none shared). Certain blocks use yield 1.00.
 - Each block's mean demand is within 150 ± 15 and each uncertain block's mean yield within 0.70 ± 0.03.
 
@@ -98,7 +98,7 @@ Everything is in `survey_config.py`:
 | `SEQUENCE_SEED_START`, `*_MEAN_TOLERANCE` | Seed search for `make_sequences.py`. |
 | Texts | Consent, instructions, comprehension questions, demographics, debrief, thank you. |
 
-To regenerate the draws, run `python make_sequences.py`. It prints the chosen seed and block means; the current file uses seed 2842, with mean demand 148.0 (CH), 151.0 (CL), 155.4 (UH), 141.4 (UL) and mean yield 0.722 (UH), 0.690 (UL). Regenerate only before data collection starts.
+To regenerate the draws, run `python make_sequences.py`. It prints the chosen seed and block means; the current file uses seed 2147, with mean demand 161.6 (CH), 160.0 (CL), 147.8 (UH), 143.2 (UL) and mean yield 0.710 (UH), 0.674 (UL). Regenerate only before data collection starts.
 
 ## 4. Connect Google Sheets
 

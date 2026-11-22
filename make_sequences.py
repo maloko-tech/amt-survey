@@ -4,9 +4,10 @@ Generate the pre-drawn demand / yield values once and write sequences.csv.
 Everyone sees the same draws. Draws belong to the block (CH, CL, UH, UL), not
 to the position in the participant's sequence.
 
-- Each block gets its own ROUNDS_PER_BLOCK demand values. No demand value
-  appears in more than one block, so participants cannot learn a repeating
-  set of numbers across blocks.
+- Each block gets its own ROUNDS_PER_BLOCK demand values, all at least
+  DEMAND_DRAW_MIN and all at least DEMAND_MIN_GAP apart from every other
+  demand (in any block), so participants cannot learn a repeating set of
+  numbers across blocks.
 - Each uncertain block (UH, UL) gets its own yield values, again with no value
   shared between the two. Certain blocks get yield 1.00 (every widget usable).
 - Starting from SEQUENCE_SEED_START, the first seed whose block means meet the
@@ -25,12 +26,12 @@ DEMAND_MEAN = (cfg.DEMAND_MIN + cfg.DEMAND_MAX) / 2
 YIELD_MEAN = (cfg.YIELD_MIN + cfg.YIELD_MAX) / 2
 
 
-def _draw_unique(rng: random.Random, lo: int, hi: int, n: int, used: set[int]) -> list[int]:
-    """n integers uniform on [lo, hi], none of them already in `used` (redrawn if so)."""
+def _draw_unique(rng: random.Random, lo: int, hi: int, n: int, used: set[int], min_gap: int = 1) -> list[int]:
+    """n integers uniform on [lo, hi], each at least min_gap away from every value in `used` (redrawn if not)."""
     values: list[int] = []
     while len(values) < n:
         v = rng.randint(lo, hi)
-        if v not in used:
+        if all(abs(v - u) >= min_gap for u in used):
             used.add(v)
             values.append(v)
     return values
@@ -45,7 +46,7 @@ def generate(seed: int) -> list[dict]:
     used_yields: set[int] = set()  # in percent
     rows = []
     for block in cfg.BLOCKS:
-        demands = _draw_unique(rng, cfg.DEMAND_MIN, cfg.DEMAND_MAX, n, used_demands)
+        demands = _draw_unique(rng, cfg.DEMAND_DRAW_MIN, cfg.DEMAND_MAX, n, used_demands, cfg.DEMAND_MIN_GAP)
         if game.is_uncertain(block):
             yields = [y / 100 for y in _draw_unique(rng, lo, hi, n, used_yields)]  # 0.40, 0.41, ..., 1.00
         else:

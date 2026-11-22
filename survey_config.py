@@ -89,6 +89,9 @@ SEQUENCES_FILE = "sequences.csv"
 SEQUENCE_SEED_START = 2015  # make_sequences.py searches upward from here
 DEMAND_MEAN_TOLERANCE = 15  # each block's mean demand within 150 +/- 15
 YIELD_MEAN_TOLERANCE = 0.03  # mean yield within 0.70 +/- 0.03
+# Extra rules for the pre-drawn demands (the stated range stays DEMAND_MIN-DEMAND_MAX):
+DEMAND_DRAW_MIN = 10  # no pre-drawn demand below this (a 0 looks like a bug)
+DEMAND_MIN_GAP = 5  # any two pre-drawn demands differ by at least this, so none look repeated
 
 # --------------------------------------------------------------------------- #
 # Answer scales
