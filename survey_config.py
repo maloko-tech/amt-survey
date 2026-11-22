@@ -23,7 +23,7 @@ short, and stable once data collection has started.
 # General settings
 # --------------------------------------------------------------------------- #
 STUDY_TITLE = "Widget selling game"
-INSTITUTION = "[University / Department]"  # TODO: replace
+INSTITUTION = "WU Vienna"
 CONTACT_EMAIL = "[researcher@university.edu]"  # TODO: replace
 
 # Link handed out to participants (make_participants.py prints BASE_URL?pid=...).
@@ -113,7 +113,7 @@ CONSENT_TEXT = f"""
 ### Informed consent
 
 You are invited to take part in a research study on ordering decisions,
-conducted by {INSTITUTION}.
+conducted at {INSTITUTION}.
 
 **What you will do.** You will play a short game in which you decide how many
 widgets to order for a shop ({N_ROUNDS} rounds), and then answer a few questions
@@ -123,9 +123,7 @@ about yourself and the game. This takes about **20–25 minutes**.
 by closing this window, without giving a reason and without any disadvantage.
 
 **Data.** Your answers are stored under your participant ID only and are used
-for research purposes only. [Add data retention / GDPR details.]
-
-**Contact.** If you have questions about the study, contact {CONTACT_EMAIL}.
+for research purposes only.
 """
 
 CONSENT_QUESTIONS = [
