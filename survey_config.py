@@ -27,7 +27,7 @@ INSTITUTION = "WU Vienna"
 CONTACT_EMAIL = "h12101572@s.wu.ac.at"
 
 # Link handed out to participants (make_participants.py prints BASE_URL?pid=...).
-BASE_URL = "http://localhost:8501"  # TODO: replace with the deployed app URL
+BASE_URL = "https://amt-survey-icssyfjzatvz5h2wih5cfb.streamlit.app"
 
 # Where the Environmental concern block (scales/environmental_concern.py) appears:
 #   "after_game"  - after the game, before demographics (default)
@@ -40,7 +40,7 @@ COMPLETION_CODE = ""
 # If Google Sheets is not configured, write to data/responses.csv instead.
 # Fine for local testing; set to False for real data collection so a broken
 # Sheets config fails loudly instead of silently writing to a local file.
-ALLOW_LOCAL_CSV_FALLBACK = True
+ALLOW_LOCAL_CSV_FALLBACK = False
 
 # --------------------------------------------------------------------------- #
 # Design: 2 x 2 within-subject (supply x profit margin), 4 blocks
@@ -66,7 +66,7 @@ SEQUENCES = {
 ASSIGNMENT_FILE = "assignment.csv"
 # Fallback for IDs not in ASSIGNMENT_FILE: sequence = hash(pid + salt) mod 4.
 # Set once before launch and then leave it alone.
-ASSIGNMENT_SALT = "change-me-before-launch"
+ASSIGNMENT_SALT = "660beeb64541"
 
 # --------------------------------------------------------------------------- #
 # Game parameters
