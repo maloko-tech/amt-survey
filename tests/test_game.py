@@ -105,15 +105,14 @@ def test_sequences_mean_criteria(draws):
             assert all(r["yield"] == 1.0 for r in rows)
 
 
-def test_same_demand_set_different_order(draws):
-    orders = {b: [r["demand"] for r in rows] for b, rows in draws.items()}
-    assert len({tuple(sorted(o)) for o in orders.values()}) == 1
-    assert len({tuple(o) for o in orders.values()}) == len(cfg.BLOCKS)
+def test_no_demand_value_repeats_across_blocks(draws):
+    demands = [r["demand"] for rows in draws.values() for r in rows]
+    assert len(demands) == len(set(demands)) == len(cfg.BLOCKS) * cfg.ROUNDS_PER_BLOCK
 
 
-def test_same_yield_set_for_uncertain_blocks_different_order(draws):
+def test_uncertain_blocks_have_their_own_yields(draws):
     uh, ul = [r["yield"] for r in draws["UH"]], [r["yield"] for r in draws["UL"]]
-    assert sorted(uh) == sorted(ul) and uh != ul
+    assert len(set(uh) | set(ul)) == 2 * cfg.ROUNDS_PER_BLOCK
 
 
 def test_sequences_csv_is_reproducible(draws):

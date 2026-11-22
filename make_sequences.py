@@ -4,11 +4,11 @@ Generate the pre-drawn demand / yield values once and write sequences.csv.
 Everyone sees the same draws. Draws belong to the block (CH, CL, UH, UL), not
 to the position in the participant's sequence.
 
-- One set of ROUNDS_PER_BLOCK demand values is used in all 4 blocks, in a
-  different order per block, so certain-vs-uncertain comparisons are not
-  driven by demand luck.
-- One set of yield values is used for UH and UL, in different orders.
-  Certain blocks get yield 1.00 (every widget usable).
+- Each block gets its own ROUNDS_PER_BLOCK demand values. No demand value
+  appears in more than one block, so participants cannot learn a repeating
+  set of numbers across blocks.
+- Each uncertain block (UH, UL) gets its own yield values, again with no value
+  shared between the two. Certain blocks get yield 1.00 (every widget usable).
 - Starting from SEQUENCE_SEED_START, the first seed whose block means meet the
   criteria (demand 150 ± 15, yield 0.70 ± 0.03) is used.
 
@@ -25,40 +25,33 @@ DEMAND_MEAN = (cfg.DEMAND_MIN + cfg.DEMAND_MAX) / 2
 YIELD_MEAN = (cfg.YIELD_MIN + cfg.YIELD_MAX) / 2
 
 
-def _distinct_orders(rng: random.Random, values: list, k: int) -> list[list] | None:
-    """k orderings of values that are pairwise different (None if values don't allow it)."""
-    orders: list[list] = []
-    for _ in range(1000):
-        candidate = values[:]
-        rng.shuffle(candidate)
-        if candidate not in orders:
-            orders.append(candidate)
-            if len(orders) == k:
-                return orders
-    return None
+def _draw_unique(rng: random.Random, lo: int, hi: int, n: int, used: set[int]) -> list[int]:
+    """n integers uniform on [lo, hi], none of them already in `used` (redrawn if so)."""
+    values: list[int] = []
+    while len(values) < n:
+        v = rng.randint(lo, hi)
+        if v not in used:
+            used.add(v)
+            values.append(v)
+    return values
 
 
-def generate(seed: int) -> list[dict] | None:
-    """Rows (block, round, demand, yield) for this seed, or None if no distinct orders exist."""
+def generate(seed: int) -> list[dict]:
+    """Rows (block, round, demand, yield) for this seed: independent draws per block."""
     rng = random.Random(seed)
     n = cfg.ROUNDS_PER_BLOCK
-    demands = [rng.randint(cfg.DEMAND_MIN, cfg.DEMAND_MAX) for _ in range(n)]
     lo, hi = round(cfg.YIELD_MIN * 100), round(cfg.YIELD_MAX * 100)
-    yields = [rng.randint(lo, hi) / 100 for _ in range(n)]  # uniform on 0.40, 0.41, ..., 1.00
-
-    blocks = list(cfg.BLOCKS)
-    uncertain = [b for b in blocks if game.is_uncertain(b)]
-    demand_orders = _distinct_orders(rng, demands, len(blocks))
-    yield_orders = _distinct_orders(rng, yields, len(uncertain))
-    if demand_orders is None or yield_orders is None:
-        return None
-    yield_by_block = dict(zip(uncertain, yield_orders))
-
+    used_demands: set[int] = set()
+    used_yields: set[int] = set()  # in percent
     rows = []
-    for block, block_demands in zip(blocks, demand_orders):
-        block_yields = yield_by_block.get(block, [1.0] * n)
+    for block in cfg.BLOCKS:
+        demands = _draw_unique(rng, cfg.DEMAND_MIN, cfg.DEMAND_MAX, n, used_demands)
+        if game.is_uncertain(block):
+            yields = [y / 100 for y in _draw_unique(rng, lo, hi, n, used_yields)]  # 0.40, 0.41, ..., 1.00
+        else:
+            yields = [1.0] * n
         for i in range(n):
-            rows.append({"block": block, "round": i + 1, "demand": block_demands[i], "yield": block_yields[i]})
+            rows.append({"block": block, "round": i + 1, "demand": demands[i], "yield": yields[i]})
     return rows
 
 
@@ -85,7 +78,7 @@ def meets_criteria(rows: list[dict]) -> bool:
 def find_seed(start: int = cfg.SEQUENCE_SEED_START, max_tries: int = 100_000) -> tuple[int, list[dict]]:
     for seed in range(start, start + max_tries):
         rows = generate(seed)
-        if rows is not None and meets_criteria(rows):
+        if meets_criteria(rows):
             return seed, rows
     raise RuntimeError("No seed met the criteria; widen the tolerances.")
 
