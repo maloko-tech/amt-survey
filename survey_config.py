@@ -24,7 +24,7 @@ short, and stable once data collection has started.
 # --------------------------------------------------------------------------- #
 STUDY_TITLE = "Widget selling game"
 INSTITUTION = "WU Vienna"
-CONTACT_EMAIL = "[researcher@university.edu]"  # TODO: replace
+CONTACT_EMAIL = "h12101572@s.wu.ac.at"
 
 # Link handed out to participants (make_participants.py prints BASE_URL?pid=...).
 BASE_URL = "http://localhost:8501"  # TODO: replace with the deployed app URL
