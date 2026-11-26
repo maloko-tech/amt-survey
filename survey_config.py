@@ -412,7 +412,6 @@ demand is uncertain, and whether that changes when the supply itself is uncertai
 (only part of the order is usable). Some participants had a high profit margin
 (unit cost 3), others a low one (unit cost 9). All participants saw the same
 demand and supply numbers.
-[Add any further debriefing.]
 
 If you have any questions, contact {CONTACT_EMAIL}.
 """
