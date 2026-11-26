@@ -1,15 +1,15 @@
 """
 Generate the pre-drawn demand / yield values once and write sequences.csv.
 
-Everyone sees the same draws. Draws belong to the block (CH, CL, UH, UL), not
-to the position in the participant's sequence.
+Everyone sees the same draws, in both groups (H and L). Draws belong to the
+block (C = certain supply, U = uncertain supply), not to its position.
 
 - Each block gets its own ROUNDS_PER_BLOCK demand values, all at least
   DEMAND_DRAW_MIN and all at least DEMAND_MIN_GAP apart from every other
   demand (in any block), so participants cannot learn a repeating set of
   numbers across blocks.
-- Each uncertain block (UH, UL) gets its own yield values, again with no value
-  shared between the two. Certain blocks get yield 1.00 (every widget usable).
+- The uncertain block (U) gets its own yield values (no value repeated). The
+  certain block gets yield 1.00 (every widget usable).
 - Starting from SEQUENCE_SEED_START, the first seed whose block means meet the
   criteria (demand 150 ± 15, yield 0.70 ± 0.03) is used.
 

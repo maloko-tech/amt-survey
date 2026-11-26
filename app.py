@@ -1,9 +1,14 @@
 """
-Widget selling game (newsvendor experiment, 2 x 2 within-subject) with survey.
+Widget selling game (newsvendor experiment) with survey.
 
-Flow: consent -> [environmental concern] -> instructions -> comprehension check
-      -> game (4 blocks) -> [environmental concern] -> demographics -> debrief -> thank you
-      (EC position: survey_config.EC_POSITION)
+Design: profit margin between subjects (group H: unit cost 3, group L: unit cost 9),
+supply within subjects (block C: certain, block U: uncertain).
+
+Flow: consent -> [survey p1-p3] -> instructions -> comprehension check
+      -> game (2 blocks) -> [survey p1-p3] -> control variables -> debrief -> thank you (with score)
+      (survey position: survey_config.EC_POSITION)
+
+Admin page (top 3 by score): ?admin=1, protected by ADMIN_PASSWORD in st.secrets.
 
 Run with:  streamlit run app.py
 
@@ -14,7 +19,7 @@ reload (F5) starts a fresh session. To keep each participant where they were:
 
 * The participant ID is written to the URL (?pid=...). On reload it is read
   back from there.
-* The counterbalancing sequence comes from assignment.csv (if the ID is listed
+* The group (and supply order) comes from assignment.csv (if the ID is listed
   there) or from a hash of the ID, so it never changes for an ID.
 * Progress (current page, answers, timestamps, game state) is mirrored into a
   server-side store keyed by participant ID and restored on reload. A confirmed
@@ -23,6 +28,7 @@ reload (F5) starts a fresh session. To keep each participant where they were:
 """
 
 import copy
+import hmac
 import re
 import threading
 import time
@@ -34,23 +40,37 @@ import streamlit as st
 
 import game
 import survey_config as cfg
-from scales import environmental_concern as ec
-from storage import save_response
+from scales import chen2022 as scale
+from storage import load_responses, save_response
 
-EC_POSITIONS = {"before_game": "instructions", "after_game": "demographics"}  # setting -> page it precedes
+assert [c for page in cfg.SURVEY_PAGES for c in page] == scale.CONSTRUCT_CODES, (
+    "SURVEY_PAGES must list every construct of scales/chen2022.py once, in the published order."
+)
+SURVEY_PAGE_IDS = [f"survey_p{i}" for i in range(1, len(cfg.SURVEY_PAGES) + 1)]
+
+EC_POSITIONS = {"before_game": "instructions", "after_game": "controls"}  # setting -> page the survey precedes
 assert cfg.EC_POSITION in EC_POSITIONS, f"EC_POSITION must be one of {list(EC_POSITIONS)}"
 
-PAGES = ["consent", "instructions", "comprehension", "game", "demographics", "debrief", "thankyou"]
-PAGES.insert(PAGES.index(EC_POSITIONS[cfg.EC_POSITION]), ec.PAGE_ID)
+PAGES = ["consent", "instructions", "comprehension", "game", "controls", "debrief", "thankyou"]
+_at = PAGES.index(EC_POSITIONS[cfg.EC_POSITION])
+PAGES[_at:_at] = SURVEY_PAGE_IDS
 LAST_QUESTION_PAGE = PAGES[-2]  # submitting this page saves the row
 QUESTION_PAGES = {
     "consent": (cfg.CONSENT_TEXT, cfg.CONSENT_QUESTIONS),
-    ec.PAGE_ID: (ec.INSTRUCTION, ec.questions()),
-    "demographics": (cfg.DEMOGRAPHICS_INTRO, cfg.DEMOGRAPHICS),
+    **{
+        page_id: (
+            scale.INSTRUCTION,
+            scale.questions(constructs, attention_check=scale.ATTENTION_CHECK and n == cfg.ATTENTION_CHECK_PAGE),
+        )
+        for n, (page_id, constructs) in enumerate(zip(SURVEY_PAGE_IDS, cfg.SURVEY_PAGES), start=1)
+    },
+    "controls": (cfg.CONTROLS_INTRO, cfg.CONTROLS),
     "debrief": (cfg.DEBRIEF_INTRO, cfg.DEBRIEF),
 }
 ALL_QUESTIONS = [q for _, qs in QUESTION_PAGES.values() for q in qs]
-PERSISTED_KEYS = ["pid", "sequence", "page", "answers", "timestamps", "submitted", "comprehension", "game"]
+PERSISTED_KEYS = [
+    "pid", "group", "supply_order", "page", "answers", "timestamps", "submitted", "comprehension", "game",
+]
 PID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 _ids = [q["id"] for q in ALL_QUESTIONS] + [q["id"] for q in cfg.COMPREHENSION]
@@ -108,7 +128,7 @@ def init_participant() -> None:
     else:
         st.session_state.update(
             pid=pid,
-            sequence=game.assign_sequence(pid),
+            **game.assign(pid),  # group, supply_order
             page=PAGES[0],
             answers={},
             timestamps={},
@@ -162,7 +182,7 @@ def render_widget(q: dict) -> None:
     if kind == "radio":
         st.radio(label, q["options"], index=None, horizontal=q.get("horizontal", False), **common)
     elif kind == "select":
-        st.selectbox(label, q["options"], index=None, placeholder="Please choose…", **common)
+        st.selectbox(label, q["options"], index=None, placeholder=q.get("placeholder", "Please choose…"), **common)
     elif kind == "likert":
         # Either inline options/labels (e.g. from scales/) or a named scale from survey_config.SCALES.
         labels = q.get("labels") or cfg.SCALES[q["scale"]]
@@ -231,13 +251,34 @@ def total_profit() -> int:
     return sum(r["profit"] for r in st.session_state.game["results"].values())
 
 
+def block_order() -> list[str]:
+    return game.block_order(st.session_state.supply_order)
+
+
+def unit_cost() -> int:
+    return game.unit_cost(st.session_state.group)
+
+
+def current_score() -> float | None:
+    """Score over all rounds played so far (shared formula: game.score)."""
+    results = st.session_state.game["results"]
+    orders = [
+        (block, results[game.round_key(block, rnd)]["order"])
+        for block in cfg.BLOCKS
+        for rnd in range(1, cfg.ROUNDS_PER_BLOCK + 1)
+        if game.round_key(block, rnd) in results
+    ]
+    return game.score(orders, st.session_state.group)
+
+
 def build_row() -> dict:
     ts = st.session_state.timestamps
-    sequence = st.session_state.sequence
+    group = st.session_state.group
     row = {
         "participant_id": st.session_state.pid,
-        "sequence": sequence,
-        **game.sequence_info(sequence),
+        "group": group,
+        "unit_cost": game.unit_cost(group),
+        "supply_order": st.session_state.supply_order,
         "started_at": ts.get("consent_start", ""),
         "submitted_at": ts.get(f"{LAST_QUESTION_PAGE}_end", ""),
         "total_seconds": seconds_between(ts.get("consent_start"), ts.get(f"{LAST_QUESTION_PAGE}_end")),
@@ -249,9 +290,11 @@ def build_row() -> dict:
         row[f"{page}_end"] = ts.get(f"{page}_end", "")
         row[f"{page}_seconds"] = seconds_between(ts.get(f"{page}_start"), ts.get(f"{page}_end"))
     row["total_profit"] = total_profit()
+    score = current_score()
+    row["score"] = "" if score is None else score
 
     results = st.session_state.game["results"]
-    order = cfg.SEQUENCES[sequence]
+    order = block_order()
     for block in cfg.BLOCKS:  # columns named by block, not position
         row[f"{block}_position"] = order.index(block) + 1
         for rnd in range(1, cfg.ROUNDS_PER_BLOCK + 1):
@@ -261,8 +304,9 @@ def build_row() -> dict:
 
     for q in ALL_QUESTIONS:
         row[q["id"]] = format_answer(st.session_state.answers.get(q["id"]))
-    if ec.ATTENTION_ITEM["code"] in row:  # attention check is not part of the EC scale
-        row[f"{ec.ATTENTION_ITEM['code']}_passed"] = ec.attention_passed(row[ec.ATTENTION_ITEM["code"]])
+    attn = scale.ATTENTION_ITEM["code"]
+    if attn in row:  # the attention check is not part of any construct
+        row[f"{attn}_passed"] = scale.attention_passed(row[attn])
     return row
 
 
@@ -309,14 +353,18 @@ def submit() -> None:
 # --------------------------------------------------------------------------- #
 # Instructions and comprehension check
 # --------------------------------------------------------------------------- #
+def instructions_text() -> str:
+    return cfg.instructions_text(st.session_state.group)
+
+
 def instructions_expander() -> None:
     with st.expander("📖 Game instructions"):
-        st.markdown(cfg.INSTRUCTIONS_TEXT)
+        st.markdown(instructions_text())
 
 
 def page_instructions() -> None:
     st.markdown("### How the game works")
-    st.markdown(cfg.INSTRUCTIONS_TEXT)
+    st.markdown(instructions_text())
     if st.button("I have read the instructions →", type="primary"):
         go_to(next_page_of("instructions"))
 
@@ -325,12 +373,13 @@ def page_comprehension() -> None:
     instructions_expander()
     st.markdown(cfg.COMPREHENSION_INTRO)
     comp = st.session_state.comprehension
+    comp_questions = cfg.comprehension(st.session_state.group)  # Q2 uses the participant's unit cost
 
-    for q in cfg.COMPREHENSION:
+    for q in comp_questions:
         if comp[q["id"]]["passed"]:
             st.success(f"✓ {q['label']} **{q['answer']:,}**")
 
-    pending = [q for q in cfg.COMPREHENSION if not comp[q["id"]]["passed"]]
+    pending = [q for q in comp_questions if not comp[q["id"]]["passed"]]
     questions = [
         {"id": q["id"], "type": "number", "label": q["label"], "min": None, "max": None, "step": 1}
         for q in pending
@@ -358,13 +407,12 @@ def page_comprehension() -> None:
 # --------------------------------------------------------------------------- #
 SUPPLY_LABEL = {"certain": "Certain supply", "uncertain": "Uncertain supply"}
 SUPPLY_COLOR = {"certain": "blue", "uncertain": "orange"}
-MARGIN_COLOR = {"high": "green", "low": "red"}
 
 
 def block_badges(block: str) -> str:
-    supply, margin = cfg.BLOCKS[block]["supply"], cfg.BLOCKS[block]["margin"]
+    supply = cfg.BLOCKS[block]["supply"]
     return (
-        f":{MARGIN_COLOR[margin]}-background[**Unit cost {game.unit_cost(block)} {cfg.CURRENCY}**] "
+        f":gray-background[**Unit cost {unit_cost()} {cfg.CURRENCY}**] "
         f":{SUPPLY_COLOR[supply]}-background[**{SUPPLY_LABEL[supply]}**]"
     )
 
@@ -394,22 +442,20 @@ def block_intro(order: list[str], idx: int) -> None:
     st.markdown(block_badges(block))
 
     if idx > 0:
-        prev = order[idx - 1]
-        changes = []
-        if game.unit_cost(prev) != game.unit_cost(block):
-            changes.append(
-                f"**The unit cost changes from {game.unit_cost(prev)} to {game.unit_cost(block)} {cfg.CURRENCY}.**"
+        prev_supply = cfg.BLOCKS[order[idx - 1]]["supply"]
+        if prev_supply != supply:
+            st.warning(
+                f"⚠️ **The supply changes in this block: from {prev_supply} to {supply}.**\n\n"
+                f"Before: {cfg.SUPPLY_RULE[prev_supply]}\n\n"
+                f"**Now: {cfg.SUPPLY_RULE[supply]}**\n\n"
+                f"Your unit cost stays {unit_cost()} {cfg.CURRENCY}."
             )
-        if cfg.BLOCKS[prev]["supply"] != supply:
-            changes.append(f"**Supply changes from {cfg.BLOCKS[prev]['supply']} to {supply}.**")
-        if changes:
-            st.warning("⚠️ Something changed compared with the previous block:\n\n" + "\n\n".join(changes))
 
     st.markdown(
         f"""
 In this block ({cfg.ROUNDS_PER_BLOCK} rounds):
 
-- **Unit cost:** {game.unit_cost(block)} {cfg.CURRENCY} per usable widget
+- **Unit cost:** {unit_cost()} {cfg.CURRENCY} per usable widget
 - **Selling price:** {cfg.PRICE} {cfg.CURRENCY} per widget sold
 - **Supply:** {cfg.SUPPLY_RULE[supply]}
 - **Demand:** {cfg.DEMAND_RULE}
@@ -428,7 +474,7 @@ def round_header(order: list[str], idx: int, rnd: int) -> None:
     st.markdown(f"#### Block {idx + 1} of {len(order)} · Round {rnd} of {cfg.ROUNDS_PER_BLOCK}")
     st.markdown(block_badges(block))
     c1, c2, c3 = st.columns(3)
-    c1.metric("Unit cost", money(game.unit_cost(block)))
+    c1.metric("Unit cost", money(unit_cost()))
     c2.metric("Selling price", money(cfg.PRICE))
     c3.metric("Total profit so far", money(total_profit()))
     st.caption(f"**Supply:** {cfg.SUPPLY_RULE[cfg.BLOCKS[block]['supply']]}  \n**Demand:** {cfg.DEMAND_RULE}")
@@ -456,7 +502,7 @@ def play_order(order: list[str], idx: int, rnd: int) -> None:
 
     draw = draws()[block][rnd - 1]
     yield_ = draw["yield"] if game.is_uncertain(block) else None
-    outcome = game.round_outcome(values[question["id"]], draw["demand"], yield_, game.unit_cost(block))
+    outcome = game.round_outcome(values[question["id"]], draw["demand"], yield_, unit_cost())
     outcome["yield"] = draw["yield"]
     outcome["seconds"] = round(time.time() - g["order_shown_at"], 1)
     g["results"][key] = outcome
@@ -512,7 +558,7 @@ def game_end() -> None:
 
 def page_game() -> None:
     g = st.session_state.game
-    order = cfg.SEQUENCES[st.session_state.sequence]
+    order = block_order()
     idx, rnd, phase = g["block_idx"], g["round"], g["phase"]
     if phase == "intro":
         block_intro(order, idx)
@@ -529,6 +575,10 @@ def page_game() -> None:
 # --------------------------------------------------------------------------- #
 def page_thankyou() -> None:
     st.markdown(cfg.THANKYOU_TEXT)
+    score = current_score()
+    if score is not None:
+        st.markdown(f"### Your score: {score:.1f} / 100")
+        st.markdown(cfg.SCORE_EXPLANATION)
     if cfg.COMPLETION_CODE:
         st.success(f"Your completion code: **{cfg.COMPLETION_CODE}**")
     st.caption(f"Participant ID: {st.session_state.pid}")
@@ -536,6 +586,61 @@ def page_thankyou() -> None:
 
 def page_declined() -> None:
     st.markdown(cfg.DECLINED_TEXT)
+
+
+# --------------------------------------------------------------------------- #
+# Admin page (?admin=1): top 3 by score, for the announcement at the end of the session
+# --------------------------------------------------------------------------- #
+MEDALS = ["🥇", "🥈", "🥉"]
+
+
+def admin_password() -> str:
+    try:
+        return str(st.secrets.get("ADMIN_PASSWORD", "") or "")
+    except Exception:  # no secrets.toml at all
+        return ""
+
+
+def page_admin() -> None:
+    st.markdown("## Admin: top players")
+    expected = admin_password()
+    if not expected:
+        st.error("ADMIN_PASSWORD is not set in the Streamlit secrets.")
+        return
+    if not st.session_state.get("admin_ok"):
+        with st.form("admin_login"):
+            password = st.text_input("Password", type="password", key="admin_password")
+            submitted = st.form_submit_button("Log in", type="primary")
+        if submitted:
+            if hmac.compare_digest((password or "").encode(), expected.encode()):
+                st.session_state.admin_ok = True
+                st.rerun()
+            st.error("Wrong password.")
+        return
+
+    st.caption(
+        f"Reads the Sheet once per click (no auto-refresh). IDs starting with {cfg.TEST_ID_PREFIX} "
+        "and incomplete rows are left out. Ties: higher total profit, then earlier submission."
+    )
+    if st.button("Refresh", type="primary", key="admin_refresh"):
+        try:
+            with st.spinner("Reading the Sheet…"):
+                st.session_state.admin_ranking = game.ranking(load_responses())
+            st.session_state.admin_refreshed_at = datetime.now().strftime("%H:%M:%S")
+        except Exception as exc:
+            st.error(f"Could not read the responses: {exc!r}")
+            return
+
+    ranking = st.session_state.get("admin_ranking")
+    if ranking is None:
+        st.info("Click **Refresh** to read the Sheet.")
+        return
+    st.caption(f"Last refreshed at {st.session_state.admin_refreshed_at}.")
+    st.metric("Completed participants", len(ranking))
+    for medal, entry in zip(MEDALS, ranking[:3]):
+        st.markdown(f"# {medal} {entry['participant_id']} · {entry['score']:.1f}")
+    with st.expander("Full ranking"):
+        st.dataframe(pd.DataFrame(ranking), hide_index=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -549,6 +654,10 @@ st.markdown(
     </style>""",
     unsafe_allow_html=True,
 )
+
+if st.query_params.get("admin") == "1":
+    page_admin()
+    st.stop()
 
 init_participant()
 

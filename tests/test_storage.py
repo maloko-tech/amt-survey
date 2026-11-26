@@ -7,7 +7,7 @@ import requests
 import storage
 import survey_config as cfg
 from tests.test_app_flow import (  # noqa: F401  (env is a fixture)
-    click, do_comprehension, do_consent, do_demographics, do_ec, do_instructions, env, page, play_game, start,
+    click, do_comprehension, do_consent, do_controls, do_instructions, do_survey, env, page, play_game, start,
 )
 
 
@@ -65,6 +65,11 @@ class FakeWorksheet:
             raise failure
         self.rows.append(list(values))
 
+    def get_all_values(self, value_render_option=None):
+        self.calls.append("get_all_values")
+        self.render_option = value_render_option
+        return [list(r) for r in self.rows]
+
     def ids(self):
         return [r[0] for r in self.rows[1:]]
 
@@ -90,7 +95,7 @@ def sheet(tmp_path, monkeypatch):
 
 
 def row(pid="P001", **extra):
-    return {"participant_id": pid, "sequence": "S1", "total_profit": 123, **extra}
+    return {"participant_id": pid, "group": "H", "score": 87.5, "total_profit": 123, **extra}
 
 
 def test_api_calls_per_save_are_minimal(sheet):
@@ -189,14 +194,14 @@ def test_app_shows_error_and_retry_button_then_saves_once(env, sheet):
     use, _ = sheet
     ws = use(FakeWorksheet(append_failures=[api_error(503)] * storage.MAX_ATTEMPTS))
 
-    pid = new_pid("S1")
+    pid = new_pid("L")
     at = start(pid)
     do_consent(at)
     do_instructions(at)
     do_comprehension(at)
     play_game(at)
-    do_ec(at)
-    do_demographics(at)
+    do_survey(at)
+    do_controls(at)
     at.text_area(key="q_strategy").input("Ordered around 150.")
     at.radio(key="q_instructions_clarity").set_value(4)
     click(at)
@@ -210,3 +215,28 @@ def test_app_shows_error_and_retry_button_then_saves_once(env, sheet):
     assert page(at) == "thankyou"
     assert ws.ids() == [pid]
     assert not storage.LOCAL_CSV.exists()
+
+
+def test_default_worksheet_is_v2():
+    assert storage.DEFAULT_WORKSHEET == "widget_game_v2"
+
+
+def test_load_responses_reads_sheet_once_unformatted(sheet):
+    from gspread.utils import ValueRenderOption
+
+    use, _ = sheet
+    ws = use(FakeWorksheet())
+    storage.save_response(row("P001"))
+    storage.save_response(row("P002", feedback="x"))
+    ws.calls.clear()
+    rows = storage.load_responses()
+    assert ws.calls == ["get_all_values"]  # one API call per Refresh
+    assert ws.render_option == ValueRenderOption.unformatted  # numbers independent of the sheet's locale
+    assert [r["participant_id"] for r in rows] == ["P001", "P002"]
+    assert rows[0]["score"] == 87.5
+
+
+def test_load_responses_without_sheets_or_fallback_raises(sheet, monkeypatch):
+    monkeypatch.setattr(storage, "sheets_configured", lambda: False)
+    with pytest.raises(RuntimeError, match="fallback is disabled"):
+        storage.load_responses()

@@ -1,5 +1,5 @@
 """
-Saving one row per participant, to Google Sheets (or a local CSV for testing).
+Saving one row per participant (and reading all rows for the admin page), to Google Sheets (or a local CSV for testing).
 
 The sheet's first row is the header. New columns (e.g. after you add a question)
 are appended to the header automatically; existing columns are never reordered,
@@ -13,6 +13,9 @@ Google Sheets API calls per saved row
                                        read the header (cached in this process)
 * Only if the header must change:      +1 to write it (+1 if the grid needs more columns)
 * Only after a failed attempt:         +1 to check whether the row already exists
+
+The admin page reads the whole worksheet with one call (load_responses), only
+when the Refresh button is clicked.
 
 The header cache assumes nobody edits the header row by hand while the app is
 running; after any failed attempt it is re-read.
@@ -38,7 +41,7 @@ import streamlit as st
 import survey_config as cfg
 
 LOCAL_CSV = Path(__file__).parent / "data" / "responses.csv"
-DEFAULT_WORKSHEET = "widget_game"
+DEFAULT_WORKSHEET = "widget_game_v2"  # new design; rows of the old widget_game tab are not comparable
 ID_COLUMN = "participant_id"
 
 MAX_ATTEMPTS = 5
@@ -177,4 +180,31 @@ def save_response(row: dict) -> str:
         with _write_lock:
             _save_to_csv(row)
         return "local_csv"
+    raise RuntimeError("Google Sheets is not configured and the local CSV fallback is disabled.")
+
+
+def _load_from_sheet() -> list[dict]:
+    """All rows of the worksheet as dicts (1 API call). Unformatted values, so numbers don't depend on the locale."""
+    from gspread.utils import ValueRenderOption
+
+    values = _worksheet().get_all_values(value_render_option=ValueRenderOption.unformatted)
+    if not values:
+        return []
+    header, *rows = values
+    return [dict(zip(header, row)) for row in rows]
+
+
+def _load_from_csv() -> list[dict]:
+    if not LOCAL_CSV.exists():
+        return []
+    with LOCAL_CSV.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def load_responses() -> list[dict]:
+    """All saved rows, from the same place save_response writes to. Raises if nothing is configured."""
+    if sheets_configured():
+        return _load_from_sheet()
+    if cfg.ALLOW_LOCAL_CSV_FALLBACK:
+        return _load_from_csv()
     raise RuntimeError("Google Sheets is not configured and the local CSV fallback is disabled.")
